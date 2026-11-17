@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Chrono Boxe</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="color-scheme" content="dark">
+<style>
+:root{--bg:#0b0b0d;--work:#ff3b30;--rest:#30d158;--fg:#fff;--muted:#8e8e93;--accent:var(--work);
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"SF Pro Display",system-ui,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6vh 24px 8vh;transition:background .3s}
+body.rest{--accent:var(--rest)}
+.top{text-align:center}
+.phase{font-size:22px;font-weight:700;letter-spacing:.2em;color:var(--accent)}
+.round{font-size:18px;color:var(--muted);margin-top:8px}
+.dots{display:flex;gap:8px;justify-content:center;margin-top:16px}
+.dot{width:10px;height:10px;border-radius:50%;background:#333}
+.dot.done{background:var(--work)}
+.dot.cur{background:var(--fg)}
+.time{font-size:min(30vw,130px);font-weight:200;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1}
+.time.warn{color:var(--accent)}
+button{width:96px;height:96px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:38px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+button:active{transform:scale(.94)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="phase" id="phase">COMBAT</div>
+  <div class="round" id="round">Round 1 / 7</div>
+  <div class="dots" id="dots"></div>
+</div>
+<div class="time" id="time">2:00</div>
+<button id="btn" aria-label="Lecture / Pause">▶</button>
+
+<script>
+const ROUNDS=7, WORK=120000, REST=60000;
+let round=1, phase='work', remaining=WORK, running=false, last=0, lastBeep=null, finished=false, ctx=null, wake=null, timer=null;
+
+const $=id=>document.getElementById(id);
+const dots=$('dots');
+for(let i=0;i<ROUNDS;i++){const d=document.createElement('div');d.className='dot';dots.appendChild(d)}
+
+function initAudio(){
+  try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
+  if(!ctx){ try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(ctx && ctx.state==='suspended') ctx.resume();
+}
+function beep(freq,dur){
+  if(!ctx) return;
+  const o=ctx.createOscillator(), g=ctx.createGain(), t=ctx.currentTime;
+  o.type='sine'; o.frequency.value=freq;
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(1,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(t); o.stop(t+dur+0.02);
+}
+
+async function lock(){ try{ if('wakeLock' in navigator) wake=await navigator.wakeLock.request('screen'); }catch(e){} }
+function unlock(){ try{ wake&&wake.release(); }catch(e){} wake=null; }
+document.addEventListener('visibilitychange',()=>{ if(running && document.visibilityState==='visible') lock(); });
+
+function render(){
+  document.body.classList.toggle('rest',phase==='rest' && !finished);
+  const s=Math.max(0,Math.ceil(remaining/1000));
+  $('time').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  $('time').classList.toggle('warn',running && s<=5 && s>0 && !finished);
+  $('phase').textContent=finished?'TERMINÉ':(phase==='work'?'COMBAT':'PAUSE');
+  $('round').textContent=finished?ROUNDS+' rounds faits':'Round '+round+' / '+ROUNDS;
+  [...dots.children].forEach((d,i)=>{
+    d.className='dot'+((i<round-1||finished)?' done':(i===round-1?' cur':''));
+  });
+  $('btn').textContent=running?'❚❚':'▶';
+}
+
+function advance(){
+  const over=remaining; // négatif ou nul : temps dépassé
+  if(phase==='work'){
+    if(round===ROUNDS){ finished=true; running=false; remaining=0; unlock(); clearInterval(timer); beep(660,0.9); return; }
+    phase='rest'; remaining=REST+over; beep(660,0.6);
+  } else {
+    round++; phase='work'; remaining=WORK+over; beep(1320,0.6);
+  }
+  lastBeep=null;
+}
+
+function tick(){
+  if(!running) return;
+  const now=performance.now();
+  remaining-=now-last; last=now;
+  const s=Math.ceil(remaining/1000);
+  if(remaining>0 && s<=5 && s>=1 && s!==lastBeep){ lastBeep=s; beep(880,0.15); }
+  if(remaining<=0) advance();
+  render();
+}
+
+function reset(){ round=1; phase='work'; remaining=WORK; lastBeep=null; finished=false; }
+
+$('btn').addEventListener('click',()=>{
+  initAudio();
+  if(running){
+    running=false; clearInterval(timer); unlock();
+  } else {
+    if(finished) reset();
+    running=true; last=performance.now();
+    clearInterval(timer); timer=setInterval(tick,100);
+    lock();
+  }
+  render();
+});
+render();
+</script>
+</body>
+</html>
